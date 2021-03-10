@@ -570,7 +570,7 @@ func TestRouterParamsFromContext(t *testing.T) {
 
 	wantParams := Params{Param{"name", "gopher"}}
 	handlerFunc := func(_ http.ResponseWriter, req *http.Request) {
-		// get params from request context
+		// get params from request myContext
 		params := ParamsFromContext(req.Context())
 
 		if !reflect.DeepEqual(params, wantParams) {
@@ -582,7 +582,7 @@ func TestRouterParamsFromContext(t *testing.T) {
 
 	var nilParams Params
 	handlerFuncNil := func(_ http.ResponseWriter, req *http.Request) {
-		// get params from request context
+		// get params from request myContext
 		params := ParamsFromContext(req.Context())
 
 		if !reflect.DeepEqual(params, nilParams) {
