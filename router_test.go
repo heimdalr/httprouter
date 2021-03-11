@@ -182,48 +182,6 @@ func TestRouterInvalidInput(t *testing.T) {
 	}
 }
 
-func TestRouterChaining(t *testing.T) {
-	router1 := New()
-	router2 := New()
-	router1.NotFound = router2
-
-	fooHit := false
-	router1.POST("/foo", func(c *Context) {
-		fooHit = true
-		c.Response.WriteHeader(http.StatusOK)
-	})
-
-	barHit := false
-	router2.POST("/bar", func(c *Context) {
-		barHit = true
-		c.Response.WriteHeader(http.StatusOK)
-	})
-
-	r, _ := http.NewRequest(http.MethodPost, "/foo", nil)
-	w := httptest.NewRecorder()
-	router1.ServeHTTP(w, r)
-	if !(w.Code == http.StatusOK && fooHit) {
-		t.Errorf("Regular routing failed with router chaining.")
-		t.FailNow()
-	}
-
-	r, _ = http.NewRequest(http.MethodPost, "/bar", nil)
-	w = httptest.NewRecorder()
-	router1.ServeHTTP(w, r)
-	if !(w.Code == http.StatusOK && barHit) {
-		t.Errorf("Chained routing failed with router chaining.")
-		t.FailNow()
-	}
-
-	r, _ = http.NewRequest(http.MethodPost, "/qax", nil)
-	w = httptest.NewRecorder()
-	router1.ServeHTTP(w, r)
-	if !(w.Code == http.StatusNotFound) {
-		t.Errorf("NotFound behavior failed with router chaining.")
-		t.FailNow()
-	}
-}
-
 func BenchmarkAllowed(b *testing.B) {
 	handlerFunc := func(_ *Context) {}
 
@@ -250,6 +208,9 @@ func TestRouterOPTIONS(t *testing.T) {
 
 	router := New()
 	router.POST("/path", handlerFunc)
+	router.Options = func(w http.ResponseWriter, req *http.Request, allow string) {
+		w.Header().Set("Allow", allow)
+	}
 
 	// test not allowed
 	// * (server)
@@ -283,10 +244,11 @@ func TestRouterOPTIONS(t *testing.T) {
 	router.GET("/path", handlerFunc)
 
 	// set a global OPTIONS handler
-	router.GlobalOPTIONS = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	router.Options = func(w http.ResponseWriter, r *http.Request, allow string) {
 		// Adjust status code to 204
 		w.WriteHeader(http.StatusNoContent)
-	})
+		w.Header().Set("Allow", allow)
+	}
 
 	// test again
 	// * (server)

@@ -78,6 +78,7 @@ package httprouter
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"strings"
 	"sync"
@@ -173,29 +174,26 @@ type Router struct {
 	// handler.
 	HandleMethodNotAllowed bool
 
-	// If enabled, the router automatically replies to OPTIONS requests.
-	// Custom OPTIONS handlers take priority over automatic replies.
-	HandleOPTIONS bool
-
-	// An optional http.Handler that is called on automatic OPTIONS requests.
-	// The handler is only called if HandleOPTIONS is true and no OPTIONS
-	// handler for the specific path was set.
-	// The "Allowed" header is set before calling the handler.
-	GlobalOPTIONS http.Handler
+	// A callback function for automatic handling OPTIONS requests. If set, the
+	// router automatically replies to OPTIONS through this callback. The final
+	// parameter (i.e. the string parameter) will be populated with a string
+	// describing the methods allowed on the requested path. The callback function is
+	// only called if no OPTIONS handler for the specific path was set.
+	Options func(http.ResponseWriter, *http.Request, string)
 
 	// Cached value of global (*) allowed methods
 	globalAllowed string
 
-	// Configurable http.Handler which is called when no matching route is
-	// found. If it is not set, http.NotFound is used.
-	NotFound http.Handler
+	// A callback function which is called, if no matching route is
+	// found. If not set, http.NotFound is used.
+	NotFound func(http.ResponseWriter, *http.Request)
 
-	// Configurable http.Handler which is called when a request
+	// A callback function which is called if a request
 	// cannot be routed and HandleMethodNotAllowed is true.
 	// If it is not set, http.Error with http.StatusMethodNotAllowed is used.
 	// The "Allow" header with allowed request methods is set before the handler
 	// is called.
-	MethodNotAllowed http.Handler
+	MethodNotAllowed func(http.ResponseWriter, *http.Request)
 
 	// Function to handle panics recovered from http handlers.
 	// It should be used to generate a error page and return the http error code
@@ -215,7 +213,6 @@ func New() *Router {
 		RedirectTrailingSlash:  true,
 		RedirectFixedPath:      true,
 		HandleMethodNotAllowed: true,
-		HandleOPTIONS:          true,
 	}
 }
 
@@ -437,9 +434,6 @@ func (r *Router) allowed(path, reqMethod string) (allow string) {
 	return allow
 }
 
-
-
-
 // ServeHTTP makes the router implement the http.Handler interface.
 func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	if r.PanicHandler != nil {
@@ -467,6 +461,8 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 			}
 			return
 		} else if req.Method != http.MethodConnect && path != "/" {
+
+
 			// Moved Permanently, request with GET method
 			code := http.StatusMovedPermanently
 			if req.Method != http.MethodGet {
@@ -499,20 +495,16 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		}
 	}
 
-	if req.Method == http.MethodOptions && r.HandleOPTIONS {
-		// Handle OPTIONS requests
+	if req.Method == http.MethodOptions && r.Options != nil {
 		if allow := r.allowed(path, http.MethodOptions); allow != "" {
-			w.Header().Set("Allow", allow)
-			if r.GlobalOPTIONS != nil {
-				r.GlobalOPTIONS.ServeHTTP(w, req)
-			}
+			r.Options(w, req, allow)
 			return
 		}
 	} else if r.HandleMethodNotAllowed { // Handle 405
 		if allow := r.allowed(path, req.Method); allow != "" {
 			w.Header().Set("Allow", allow)
 			if r.MethodNotAllowed != nil {
-				r.MethodNotAllowed.ServeHTTP(w, req)
+				r.MethodNotAllowed(w, req)
 			} else {
 				http.Error(w,
 					http.StatusText(http.StatusMethodNotAllowed),
@@ -525,12 +517,20 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 
 	// Handle 404
 	if r.NotFound != nil {
-		r.NotFound.ServeHTTP(w, req)
+		r.NotFound(w, req)
 	} else {
-		http.NotFound(w, req)
+		defaultNotFound(w, req)
 	}
 }
 
+func defaultNotFound(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set(HeaderContentType, MIMEApplicationJSONCharsetUTF8)
+	w.WriteHeader(http.StatusNotFound)
+	bytes, _ := json.Marshal(struct {
+		Error string `json:"error"`
+	}{Error: "not found"})
+	w.Write(bytes)
+}
 
 // MIME types
 const (
