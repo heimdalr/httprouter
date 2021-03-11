@@ -1,4 +1,4 @@
-module github.com/julienschmidt/httprouter
+module github.com/heimdalr/httprouter
 
 go 1.7
 
