@@ -44,7 +44,7 @@ type (
 
 	myContext struct {
 		Request  *http.Request
-		Response *responseWriter
+		Response http.ResponseWriter
 		Status   int
 		Params   Params
 		Store    map[string]interface{}
@@ -54,12 +54,15 @@ type (
 	}
 )
 
-func (c *myContext) writeContentType(value string) {
-	header := c.Response.Header()
-	if header.Get(HeaderContentType) == "" {
-		header.Set(HeaderContentType, value)
-	}
+func AcquireContextObject() *myContext {
+	// TODO: acquire from pool
+	return &myContext{}
 }
+
+func ReleaseContextObject(c *myContext) {
+	// TODO: release to pool
+}
+
 
 func (c *myContext) RealIP() string {
 	if ip := c.Request.Header.Get(HeaderXForwardedFor); ip != "" {
@@ -76,32 +79,33 @@ func (c *myContext) RealIP() string {
 	return ra
 }
 
-func (c *myContext) json(code int, i interface{}, indent string) error {
+func (c *myContext) JSON(code int, i interface{}) error {
 	enc := json.NewEncoder(c.Response)
-	if indent != "" {
-		enc.SetIndent("", indent)
-	}
-	c.writeContentType(MIMEApplicationJSONCharsetUTF8)
+	c.Response.Header().Set(HeaderContentType, MIMEApplicationJSONCharsetUTF8)
+	c.Status = code
 	c.Response.WriteHeader(code)
 	return enc.Encode(i)
 }
 
-func (c *myContext) JSON(code int, i interface{}) error {
-	return c.json(code, i, "")
-}
-
 func (c *myContext) JSONPretty(code int, i interface{}, indent string) error {
-	return c.json(code, i, indent)
+	enc := json.NewEncoder(c.Response)
+	enc.SetIndent("", indent)
+	c.Response.Header().Set(HeaderContentType, MIMEApplicationJSONCharsetUTF8)
+	c.Status = code
+	c.Response.WriteHeader(code)
+	return enc.Encode(i)
 }
 
 func (c *myContext) JSONBlob(code int, b []byte) (err error) {
-	c.writeContentType(MIMEApplicationJSONCharsetUTF8)
+	c.Response.Header().Set(HeaderContentType, MIMEApplicationJSONCharsetUTF8)
+	c.Status = code
 	c.Response.WriteHeader(code)
 	_, err = c.Response.Write(b)
 	return
 }
 
 func (c *myContext) NoContent(code int) {
+	c.Status = code
 	c.Response.WriteHeader(code)
 }
 
@@ -110,6 +114,7 @@ func (c *myContext) Redirect(code int, url string) {
 		panic("invalid redirect code")
 	}
 	c.Response.Header().Set(HeaderLocation, url)
+	c.Status = code
 	c.Response.WriteHeader(code)
 }
 

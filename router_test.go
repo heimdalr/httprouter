@@ -49,11 +49,11 @@ func TestRouter(t *testing.T) {
 	router := New()
 
 	routed := false
-	router.Handle(http.MethodGet, "/user/:name", func(w http.ResponseWriter, r *http.Request, ps Params) {
+	router.Handle(http.MethodGet, "/user/:name", func(c *myContext) {
 		routed = true
 		want := Params{Param{"name", "gopher"}}
-		if !reflect.DeepEqual(ps, want) {
-			t.Fatalf("wrong wildcard values: want %v, got %v", want, ps)
+		if !reflect.DeepEqual(c.Params, want) {
+			t.Fatalf("wrong wildcard values: want %v, got %v", want, c.Params)
 		}
 	})
 
@@ -76,35 +76,30 @@ func (h handlerStruct) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func TestRouterAPI(t *testing.T) {
-	var get, head, options, post, put, patch, delete, handler, handlerFunc bool
+	var get, head, options, post, put, patch, delete bool
 
-	httpHandler := handlerStruct{&handler}
 
 	router := New()
-	router.GET("/GET", func(w http.ResponseWriter, r *http.Request, _ Params) {
+	router.GET("/GET", func(_ *myContext) {
 		get = true
 	})
-	router.HEAD("/GET", func(w http.ResponseWriter, r *http.Request, _ Params) {
+	router.HEAD("/GET", func(_ *myContext) {
 		head = true
 	})
-	router.OPTIONS("/GET", func(w http.ResponseWriter, r *http.Request, _ Params) {
+	router.OPTIONS("/GET", func(_ *myContext) {
 		options = true
 	})
-	router.POST("/POST", func(w http.ResponseWriter, r *http.Request, _ Params) {
+	router.POST("/POST", func(_ *myContext) {
 		post = true
 	})
-	router.PUT("/PUT", func(w http.ResponseWriter, r *http.Request, _ Params) {
+	router.PUT("/PUT", func(_ *myContext) {
 		put = true
 	})
-	router.PATCH("/PATCH", func(w http.ResponseWriter, r *http.Request, _ Params) {
+	router.PATCH("/PATCH", func(_ *myContext) {
 		patch = true
 	})
-	router.DELETE("/DELETE", func(w http.ResponseWriter, r *http.Request, _ Params) {
+	router.DELETE("/DELETE", func(_ *myContext) {
 		delete = true
-	})
-	router.Handler(http.MethodGet, "/Handler", httpHandler)
-	router.HandlerFunc(http.MethodGet, "/HandlerFunc", func(w http.ResponseWriter, r *http.Request) {
-		handlerFunc = true
 	})
 
 	w := new(mockResponseWriter)
@@ -151,23 +146,12 @@ func TestRouterAPI(t *testing.T) {
 		t.Error("routing DELETE failed")
 	}
 
-	r, _ = http.NewRequest(http.MethodGet, "/Handler", nil)
-	router.ServeHTTP(w, r)
-	if !handler {
-		t.Error("routing Handler failed")
-	}
-
-	r, _ = http.NewRequest(http.MethodGet, "/HandlerFunc", nil)
-	router.ServeHTTP(w, r)
-	if !handlerFunc {
-		t.Error("routing HandlerFunc failed")
-	}
 }
 
 func TestRouterInvalidInput(t *testing.T) {
 	router := New()
 
-	handle := func(_ http.ResponseWriter, _ *http.Request, _ Params) {}
+	handle := func(_ *myContext) {}
 
 	recv := catchPanic(func() {
 		router.Handle("", "/", handle)
@@ -204,15 +188,15 @@ func TestRouterChaining(t *testing.T) {
 	router1.NotFound = router2
 
 	fooHit := false
-	router1.POST("/foo", func(w http.ResponseWriter, req *http.Request, _ Params) {
+	router1.POST("/foo", func(c *myContext) {
 		fooHit = true
-		w.WriteHeader(http.StatusOK)
+		c.Response.WriteHeader(http.StatusOK)
 	})
 
 	barHit := false
-	router2.POST("/bar", func(w http.ResponseWriter, req *http.Request, _ Params) {
+	router2.POST("/bar", func(c *myContext) {
 		barHit = true
-		w.WriteHeader(http.StatusOK)
+		c.Response.WriteHeader(http.StatusOK)
 	})
 
 	r, _ := http.NewRequest(http.MethodPost, "/foo", nil)
@@ -241,7 +225,7 @@ func TestRouterChaining(t *testing.T) {
 }
 
 func BenchmarkAllowed(b *testing.B) {
-	handlerFunc := func(_ http.ResponseWriter, _ *http.Request, _ Params) {}
+	handlerFunc := func(_ *myContext) {}
 
 	router := New()
 	router.POST("/path", handlerFunc)
@@ -262,7 +246,7 @@ func BenchmarkAllowed(b *testing.B) {
 }
 
 func TestRouterOPTIONS(t *testing.T) {
-	handlerFunc := func(_ http.ResponseWriter, _ *http.Request, _ Params) {}
+	handlerFunc := func(_ *myContext) {}
 
 	router := New()
 	router.POST("/path", handlerFunc)
@@ -327,7 +311,7 @@ func TestRouterOPTIONS(t *testing.T) {
 
 	// custom handler
 	var custom bool
-	router.OPTIONS("/path", func(w http.ResponseWriter, r *http.Request, _ Params) {
+	router.OPTIONS("/path", func(_ *myContext) {
 		custom = true
 	})
 
@@ -358,7 +342,7 @@ func TestRouterOPTIONS(t *testing.T) {
 }
 
 func TestRouterNotAllowed(t *testing.T) {
-	handlerFunc := func(_ http.ResponseWriter, _ *http.Request, _ Params) {}
+	handlerFunc := func(_ *myContext) {}
 
 	router := New()
 	router.POST("/path", handlerFunc)
@@ -407,7 +391,7 @@ func TestRouterNotAllowed(t *testing.T) {
 }
 
 func TestRouterNotFound(t *testing.T) {
-	handlerFunc := func(_ http.ResponseWriter, _ *http.Request, _ Params) {}
+	handlerFunc := func(_ *myContext) {}
 
 	router := New()
 	router.GET("/path", handlerFunc)
@@ -479,7 +463,7 @@ func TestRouterPanicHandler(t *testing.T) {
 		panicHandled = true
 	}
 
-	router.Handle(http.MethodPut, "/user/:name", func(_ http.ResponseWriter, _ *http.Request, _ Params) {
+	router.Handle(http.MethodPut, "/user/:name", func(_ *myContext) {
 		panic("oops!")
 	})
 
@@ -501,7 +485,7 @@ func TestRouterPanicHandler(t *testing.T) {
 
 func TestRouterLookup(t *testing.T) {
 	routed := false
-	wantHandle := func(_ http.ResponseWriter, _ *http.Request, _ Params) {
+	wantHandle := func(_ *myContext) {
 		routed = true
 	}
 	wantParams := Params{Param{"name", "gopher"}}
@@ -523,7 +507,7 @@ func TestRouterLookup(t *testing.T) {
 	if handle == nil {
 		t.Fatal("Got no handle!")
 	} else {
-		handle(nil, nil, nil)
+		handle(nil)
 		if !routed {
 			t.Fatal("Routing failed!")
 		}
@@ -539,7 +523,7 @@ func TestRouterLookup(t *testing.T) {
 	if handle == nil {
 		t.Fatal("Got no handle!")
 	} else {
-		handle(nil, nil, nil)
+		handle(nil)
 		if !routed {
 			t.Fatal("Routing failed!")
 		}
@@ -565,56 +549,12 @@ func TestRouterLookup(t *testing.T) {
 	}
 }
 
-func TestRouterParamsFromContext(t *testing.T) {
-	routed := false
-
-	wantParams := Params{Param{"name", "gopher"}}
-	handlerFunc := func(_ http.ResponseWriter, req *http.Request) {
-		// get params from request myContext
-		params := ParamsFromContext(req.Context())
-
-		if !reflect.DeepEqual(params, wantParams) {
-			t.Fatalf("Wrong parameter values: want %v, got %v", wantParams, params)
-		}
-
-		routed = true
-	}
-
-	var nilParams Params
-	handlerFuncNil := func(_ http.ResponseWriter, req *http.Request) {
-		// get params from request myContext
-		params := ParamsFromContext(req.Context())
-
-		if !reflect.DeepEqual(params, nilParams) {
-			t.Fatalf("Wrong parameter values: want %v, got %v", nilParams, params)
-		}
-
-		routed = true
-	}
-	router := New()
-	router.HandlerFunc(http.MethodGet, "/user", handlerFuncNil)
-	router.HandlerFunc(http.MethodGet, "/user/:name", handlerFunc)
-
-	w := new(mockResponseWriter)
-	r, _ := http.NewRequest(http.MethodGet, "/user/gopher", nil)
-	router.ServeHTTP(w, r)
-	if !routed {
-		t.Fatal("Routing failed!")
-	}
-
-	routed = false
-	r, _ = http.NewRequest(http.MethodGet, "/user", nil)
-	router.ServeHTTP(w, r)
-	if !routed {
-		t.Fatal("Routing failed!")
-	}
-}
 
 func TestRouterMatchedRoutePath(t *testing.T) {
 	route1 := "/user/:name"
 	routed1 := false
-	handle1 := func(_ http.ResponseWriter, req *http.Request, ps Params) {
-		route := ps.MatchedRoutePath()
+	handle1 := func(c *myContext) {
+		route := c.Params.MatchedRoutePath()
 		if route != route1 {
 			t.Fatalf("Wrong matched route: want %s, got %s", route1, route)
 		}
@@ -623,8 +563,8 @@ func TestRouterMatchedRoutePath(t *testing.T) {
 
 	route2 := "/user/:name/details"
 	routed2 := false
-	handle2 := func(_ http.ResponseWriter, req *http.Request, ps Params) {
-		route := ps.MatchedRoutePath()
+	handle2 := func(c *myContext) {
+		route := c.Params.MatchedRoutePath()
 		if route != route2 {
 			t.Fatalf("Wrong matched route: want %s, got %s", route2, route)
 		}
@@ -633,8 +573,8 @@ func TestRouterMatchedRoutePath(t *testing.T) {
 
 	route3 := "/"
 	routed3 := false
-	handle3 := func(_ http.ResponseWriter, req *http.Request, ps Params) {
-		route := ps.MatchedRoutePath()
+	handle3 := func(c *myContext) {
+		route := c.Params.MatchedRoutePath()
 		if route != route3 {
 			t.Fatalf("Wrong matched route: want %s, got %s", route3, route)
 		}

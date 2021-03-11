@@ -6,7 +6,6 @@ package httprouter
 
 import (
 	"fmt"
-	"net/http"
 	"reflect"
 	"regexp"
 	"strings"
@@ -27,7 +26,7 @@ import (
 var fakeHandlerValue string
 
 func fakeHandler(val string) Handle {
-	return func(http.ResponseWriter, *http.Request, Params) {
+	return func(ctx * myContext) {
 		fakeHandlerValue = val
 	}
 }
@@ -56,7 +55,7 @@ func checkRequests(t *testing.T, tree *node, requests testRequests) {
 		case request.nilHandler:
 			t.Errorf("handle mismatch for route '%s': Expected nil handle", request.path)
 		default:
-			handler(nil, nil, nil)
+			handler(nil)
 			if fakeHandlerValue != request.route {
 				t.Errorf("handle mismatch for route '%s': Wrong handle (%s != %s)", request.path, fakeHandlerValue, request.route)
 			}

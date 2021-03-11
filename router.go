@@ -84,9 +84,9 @@ import (
 )
 
 // Handle is a function that can be registered to a route to handle HTTP
-// requests. Like http.HandlerFunc, but has a third parameter for the values of
-// wildcards (path variables).
-type Handle func(http.ResponseWriter, *http.Request, Params)
+// requests. Like http.HandlerFunc, but with a context object wrapping request,
+// response, params, etc.
+type Handle func(c *myContext)
 
 // Param is a single URL parameter, consisting of a key and a value.
 type Param struct {
@@ -232,16 +232,17 @@ func (r *Router) putParams(ps *Params) {
 }
 
 func (r *Router) saveMatchedRoutePath(path string, handle Handle) Handle {
-	return func(w http.ResponseWriter, req *http.Request, ps Params) {
-		if ps == nil {
+	return func(c *myContext) {
+		if c.Params == nil {
 			psp := r.getParams()
-			ps = (*psp)[0:1]
+			ps := (*psp)[0:1]
 			ps[0] = Param{Key: MatchedRoutePathParam, Value: path}
-			handle(w, req, ps)
+			c.Params = ps
+			handle(c)
 			r.putParams(psp)
 		} else {
-			ps = append(ps, Param{Key: MatchedRoutePathParam, Value: path})
-			handle(w, req, ps)
+			c.Params = append(c.Params, Param{Key: MatchedRoutePathParam, Value: path})
+			handle(c)
 		}
 	}
 }
@@ -335,28 +336,6 @@ func (r *Router) Handle(method, path string, handle Handle) {
 	}
 }
 
-// Handler is an adapter which allows the usage of an http.Handler as a
-// request handle.
-// The Params are available in the request myContext under ParamsKey.
-func (r *Router) Handler(method, path string, handler http.Handler) {
-	r.Handle(method, path,
-		func(w http.ResponseWriter, req *http.Request, p Params) {
-			if len(p) > 0 {
-				ctx := req.Context()
-				ctx = context.WithValue(ctx, ParamsKey, p)
-				req = req.WithContext(ctx)
-			}
-			handler.ServeHTTP(w, req)
-		},
-	)
-}
-
-// HandlerFunc is an adapter which allows the usage of an http.HandlerFunc as a
-// request handle.
-func (r *Router) HandlerFunc(method, path string, handler http.HandlerFunc) {
-	r.Handler(method, path, handler)
-}
-
 // ServeFiles serves files from the given file system root.
 // The path must end with "/*filepath", files are then served from the local
 // path /defined/root/dir/*filepath.
@@ -374,9 +353,10 @@ func (r *Router) ServeFiles(path string, root http.FileSystem) {
 
 	fileServer := http.FileServer(root)
 
-	r.GET(path, func(w http.ResponseWriter, req *http.Request, ps Params) {
-		req.URL.Path = ps.ByName("filepath")
-		fileServer.ServeHTTP(w, req)
+	//r.GET(path, func(w http.ResponseWriter, req *http.Request, ps Params) {
+	r.GET(path, func(c *myContext) {
+		c.Request.URL.Path = c.Params.ByName("filepath")
+		fileServer.ServeHTTP(c.Response, c.Request)
 	})
 }
 
@@ -457,6 +437,9 @@ func (r *Router) allowed(path, reqMethod string) (allow string) {
 	return allow
 }
 
+
+
+
 // ServeHTTP makes the router implement the http.Handler interface.
 func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	if r.PanicHandler != nil {
@@ -468,10 +451,19 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	if root := r.trees[req.Method]; root != nil {
 		if handle, ps, tsr := root.getValue(path, r.getParams); handle != nil {
 			if ps != nil {
-				handle(w, req, *ps)
+				c := AcquireContextObject()
+				c.Request = req
+				c.Response = w
+				c.Params = *ps
+				handle(c)
+				ReleaseContextObject(c)
 				r.putParams(ps)
 			} else {
-				handle(w, req, nil)
+				c := AcquireContextObject()
+				c.Request = req
+				c.Response = w
+				handle(c)
+				ReleaseContextObject(c)
 			}
 			return
 		} else if req.Method != http.MethodConnect && path != "/" {
