@@ -26,7 +26,7 @@ import (
 var fakeHandlerValue string
 
 func fakeHandler(val string) Handle {
-	return func(ctx * myContext) {
+	return func(ctx *Context) {
 		fakeHandlerValue = val
 	}
 }

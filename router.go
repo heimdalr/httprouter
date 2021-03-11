@@ -86,7 +86,7 @@ import (
 // Handle is a function that can be registered to a route to handle HTTP
 // requests. Like http.HandlerFunc, but with a context object wrapping request,
 // response, params, etc.
-type Handle func(c *myContext)
+type Handle func(c *Context)
 
 // Param is a single URL parameter, consisting of a key and a value.
 type Param struct {
@@ -141,7 +141,7 @@ type Router struct {
 	paramsPool sync.Pool
 	maxParams  uint16
 
-	// If enabled, adds the matched route path onto the http.Request myContext
+	// If enabled, adds the matched route path onto the http.Request Context
 	// before invoking the handler.
 	// The matched route path is only added to handlers of routes that were
 	// registered when this option was enabled.
@@ -232,7 +232,7 @@ func (r *Router) putParams(ps *Params) {
 }
 
 func (r *Router) saveMatchedRoutePath(path string, handle Handle) Handle {
-	return func(c *myContext) {
+	return func(c *Context) {
 		if c.Params == nil {
 			psp := r.getParams()
 			ps := (*psp)[0:1]
@@ -354,7 +354,7 @@ func (r *Router) ServeFiles(path string, root http.FileSystem) {
 	fileServer := http.FileServer(root)
 
 	//r.GET(path, func(w http.ResponseWriter, req *http.Request, ps Params) {
-	r.GET(path, func(c *myContext) {
+	r.GET(path, func(c *Context) {
 		c.Request.URL.Path = c.Params.ByName("filepath")
 		fileServer.ServeHTTP(c.Response, c.Request)
 	})

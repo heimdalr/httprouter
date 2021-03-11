@@ -11,60 +11,27 @@ import (
 	"sync"
 )
 
-
-
-type (
-
-	// NyContext represents the myContext of the current HTTP request.
-	NyContext interface {
-
-		// JSON sends a JSON response with status code.
-		JSON(code int, i interface{}) error
-
-		// JSONPretty sends a pretty-print JSON with status code.
-		JSONPretty(code int, i interface{}, indent string) error
-
-		// JSONBlob sends a JSON blob response with status code.
-		JSONBlob(code int, b []byte) error
-
-		// NoContent sends a response with no body and a status code.
-		NoContent(code int) error
-
-		// Redirect redirects the request to a provided URL with status code.
-		Redirect(code int, url string) error
-
-		// Error invokes the registered HTTP error handler. Generally used by middleware.
-		Error(err error)
-
-		// Reset resets the myContext after request completes. It must be called along
-		// with `Echo#AcquireContext()` and `Echo#ReleaseContext()`.
-		// See `Echo#ServeHTTP()`
-		Reset(r *http.Request, w http.ResponseWriter)
-	}
-
-	myContext struct {
-		Request  *http.Request
-		Response http.ResponseWriter
-		Status   int
-		Params   Params
-		Store    map[string]interface{}
-		Logger   zerolog.Logger
-		ErrorHandler func(status int, err error, c *myContext)
-		lock     sync.RWMutex
-	}
-)
-
-func AcquireContextObject() *myContext {
-	// TODO: acquire from pool
-	return &myContext{}
+type Context struct {
+	Request      *http.Request
+	Response     http.ResponseWriter
+	Status       int
+	Params       Params
+	Store        map[string]interface{}
+	Logger       zerolog.Logger
+	ErrorHandler func(status int, err error, c *Context)
+	lock         sync.RWMutex
 }
 
-func ReleaseContextObject(c *myContext) {
+func AcquireContextObject() *Context {
+	// TODO: acquire from pool
+	return &Context{}
+}
+
+func ReleaseContextObject(c *Context) {
 	// TODO: release to pool
 }
 
-
-func (c *myContext) RealIP() string {
+func (c *Context) RealIP() string {
 	if ip := c.Request.Header.Get(HeaderXForwardedFor); ip != "" {
 		i := strings.IndexAny(ip, ", ")
 		if i > 0 {
@@ -79,7 +46,7 @@ func (c *myContext) RealIP() string {
 	return ra
 }
 
-func (c *myContext) JSON(code int, i interface{}) error {
+func (c *Context) JSON(code int, i interface{}) error {
 	enc := json.NewEncoder(c.Response)
 	c.Response.Header().Set(HeaderContentType, MIMEApplicationJSONCharsetUTF8)
 	c.Status = code
@@ -87,7 +54,7 @@ func (c *myContext) JSON(code int, i interface{}) error {
 	return enc.Encode(i)
 }
 
-func (c *myContext) JSONPretty(code int, i interface{}, indent string) error {
+func (c *Context) JSONPretty(code int, i interface{}, indent string) error {
 	enc := json.NewEncoder(c.Response)
 	enc.SetIndent("", indent)
 	c.Response.Header().Set(HeaderContentType, MIMEApplicationJSONCharsetUTF8)
@@ -96,7 +63,7 @@ func (c *myContext) JSONPretty(code int, i interface{}, indent string) error {
 	return enc.Encode(i)
 }
 
-func (c *myContext) JSONBlob(code int, b []byte) (err error) {
+func (c *Context) JSONBlob(code int, b []byte) (err error) {
 	c.Response.Header().Set(HeaderContentType, MIMEApplicationJSONCharsetUTF8)
 	c.Status = code
 	c.Response.WriteHeader(code)
@@ -104,12 +71,12 @@ func (c *myContext) JSONBlob(code int, b []byte) (err error) {
 	return
 }
 
-func (c *myContext) NoContent(code int) {
+func (c *Context) NoContent(code int) {
 	c.Status = code
 	c.Response.WriteHeader(code)
 }
 
-func (c *myContext) Redirect(code int, url string) {
+func (c *Context) Redirect(code int, url string) {
 	if code < 300 || code > 308 {
 		panic("invalid redirect code")
 	}
@@ -118,6 +85,6 @@ func (c *myContext) Redirect(code int, url string) {
 	c.Response.WriteHeader(code)
 }
 
-func (c *myContext) Error(code int, err error) {
+func (c *Context) Error(code int, err error) {
 	c.ErrorHandler(code, err, c)
 }
