@@ -79,6 +79,7 @@ package httprouter
 import (
 	"context"
 	"encoding/json"
+	"github.com/rs/zerolog/log"
 	"net/http"
 	"strings"
 	"sync"
@@ -447,7 +448,13 @@ func (r *Router) allowed(path, reqMethod string) (allow string) {
 }
 
 // ServeHTTP makes the router implement the http.Handler interface.
-func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
+func (r *Router) ServeHTTP(wo http.ResponseWriter, req *http.Request) {
+
+	// wrap the original response writer into a negroni like response writer and go
+	// with that
+	//
+	// see: https://github.com/urfave/negroni/blob/master/response_writer.go
+ 	w := NewResponseWriter(wo)
 
 	// if panics should be handled, "register" the handling
 	if r.PanicHandler != nil {
@@ -496,12 +503,13 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 
 				// handle the request
 				handle(c)
-
 				// release the context object
 				ReleaseContextObject(c)
 			}
 
 			// done serving the request
+			//log.Info().Str("method", req.Method).Int("status", w.Status()).Msg(w.Error().Error())
+			log.Info().Str("method", req.Method).Int("status", w.Status()).Msg("")
 			return
 		}
 
@@ -526,6 +534,8 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 
 				// redirect to the tsr-fixed URL
 				http.Redirect(w, req, req.URL.String(), code)
+
+				log.Info().Str("method", req.Method).Int("status", code).Msg("")
 
 				// done serving the request
 				return

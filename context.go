@@ -13,8 +13,7 @@ import (
 
 type Context struct {
 	Request      *http.Request
-	Response     http.ResponseWriter
-	Status       int
+	Response     ResponseWriter
 	Params       Params
 	Store        map[string]interface{}
 	Logger       zerolog.Logger
@@ -46,34 +45,35 @@ func (c *Context) RealIP() string {
 	return ra
 }
 
-func (c *Context) JSON(code int, i interface{}) error {
+func (c *Context) JSON(code int, i interface{})  {
 	enc := json.NewEncoder(c.Response)
 	c.Response.Header().Set(HeaderContentType, MIMEApplicationJSONCharsetUTF8)
-	c.Status = code
 	c.Response.WriteHeader(code)
-	return enc.Encode(i)
+	err := enc.Encode(i)
+	if err != nil {
+		panic(err)
+	}
 }
 
 func (c *Context) JSONPretty(code int, i interface{}, indent string) error {
 	enc := json.NewEncoder(c.Response)
 	enc.SetIndent("", indent)
 	c.Response.Header().Set(HeaderContentType, MIMEApplicationJSONCharsetUTF8)
-	c.Status = code
 	c.Response.WriteHeader(code)
 	return enc.Encode(i)
 }
 
 func (c *Context) JSONBlob(code int, b []byte) (err error) {
 	c.Response.Header().Set(HeaderContentType, MIMEApplicationJSONCharsetUTF8)
-	c.Status = code
 	c.Response.WriteHeader(code)
 	_, err = c.Response.Write(b)
 	return
 }
 
 func (c *Context) NoContent(code int) {
-	c.Status = code
 	c.Response.WriteHeader(code)
+	_, _ = c.Response.Write(nil)
+	return
 }
 
 func (c *Context) Redirect(code int, url string) {
@@ -81,10 +81,9 @@ func (c *Context) Redirect(code int, url string) {
 		panic("invalid redirect code")
 	}
 	c.Response.Header().Set(HeaderLocation, url)
-	c.Status = code
 	c.Response.WriteHeader(code)
 }
 
 func (c *Context) Error(code int, err error) {
-	c.ErrorHandler(code, err, c)
+	c.Response.WriteHeaderError(code, err)
 }
