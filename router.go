@@ -166,6 +166,17 @@ type Router struct {
 	// RedirectTrailingSlash is independent of this option.
 	RedirectFixedPath bool
 
+	// If enabled, the router automatically replies to OPTIONS requests.
+	// Custom OPTIONS handlers take priority over automatic replies.
+	HandleOptions bool
+
+	// A callback function for handling OPTION requests. The function is only called,
+	// if no path-specific OPTIONS handler was set and HandleOptions is true.
+	//
+	// The final parameter of the callback function (i.e. the string parameter) will
+	// be populated with a sting describing the methods allowed on the specific path.
+	Options func(http.ResponseWriter, *http.Request, string)
+
 	// If enabled, the router checks if another method is allowed for the
 	// current route, if the current request can not be routed.
 	// If this is the case, the request is answered with 'Method Not Allowed'
@@ -174,26 +185,16 @@ type Router struct {
 	// handler.
 	HandleMethodNotAllowed bool
 
-	// A callback function for automatic handling OPTIONS requests. If set, the
-	// router automatically replies to OPTIONS through this callback. The final
-	// parameter (i.e. the string parameter) will be populated with a string
-	// describing the methods allowed on the requested path. The callback function is
-	// only called if no OPTIONS handler for the specific path was set.
-	Options func(http.ResponseWriter, *http.Request, string)
-
-	// Cached value of global (*) allowed methods
-	globalAllowed string
+	// A callback function for handling non-OPTION requests. The function is only called,
+	// if no path-specific method handler was set and HandleMethodNotAllowed is true.
+	//
+	// The final parameter of the callback function (i.e. the string parameter) will
+	// be populated with a sting describing the methods allowed on the specific path.
+	MethodNotAllowed func(http.ResponseWriter, *http.Request, string)
 
 	// A callback function which is called, if no matching route is
 	// found. If not set, http.NotFound is used.
 	NotFound func(http.ResponseWriter, *http.Request)
-
-	// A callback function which is called if a request
-	// cannot be routed and HandleMethodNotAllowed is true.
-	// If it is not set, http.Error with http.StatusMethodNotAllowed is used.
-	// The "Allow" header with allowed request methods is set before the handler
-	// is called.
-	MethodNotAllowed func(http.ResponseWriter, *http.Request)
 
 	// Function to handle panics recovered from http handlers.
 	// It should be used to generate a error page and return the http error code
@@ -201,6 +202,10 @@ type Router struct {
 	// The handler can be used to keep your server from crashing because of
 	// unrecovered panics.
 	PanicHandler func(http.ResponseWriter, *http.Request, interface{})
+
+	// Cached value of global (*) allowed methods
+	globalAllowed string
+
 }
 
 // Make sure the Router conforms with the http.Handler interface
@@ -436,89 +441,167 @@ func (r *Router) allowed(path, reqMethod string) (allow string) {
 
 // ServeHTTP makes the router implement the http.Handler interface.
 func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
+
+	// if panics should be handled, "register" the handling
 	if r.PanicHandler != nil {
 		defer r.recv(w, req)
 	}
 
 	path := req.URL.Path
 
+	// if there is paths registered for the method (incl. OPTIONS)
 	if root := r.trees[req.Method]; root != nil {
-		if handle, ps, tsr := root.getValue(path, r.getParams); handle != nil {
+
+		// try to match a registered handler
+		handle, ps, tsr := root.getValue(path, r.getParams)
+
+		// if there is a handler registered for this path (this is the "happy path")
+		if handle != nil {
+
+			// if parameters where extracted from the path
 			if ps != nil {
+
+				// acquire a context object
 				c := AcquireContextObject()
+
+				// wrap request, response and parameters in the context object
 				c.Request = req
 				c.Response = w
 				c.Params = *ps
+
+				// handle the request
 				handle(c)
+
+				// release the context object
 				ReleaseContextObject(c)
+
+				// release the parameters
 				r.putParams(ps)
+
 			} else {
+
+				// acquire a context object
 				c := AcquireContextObject()
+
+				// wrap request and response in the context object
 				c.Request = req
 				c.Response = w
+
+				// handle the request
 				handle(c)
+
+				// release the context object
 				ReleaseContextObject(c)
 			}
+
+			// done serving the request
 			return
-		} else if req.Method != http.MethodConnect && path != "/" {
+		}
 
+		// no matching path but try to fix the path (trailing slashes and case), unless
+		// CONNECT or the root path
+		if req.Method != http.MethodConnect && path != "/" {
 
-			// Moved Permanently, request with GET method
+			// set status 301 for GETs and 308 for all other methods
 			code := http.StatusMovedPermanently
 			if req.Method != http.MethodGet {
-				// Permanent Redirect, request with same method
 				code = http.StatusPermanentRedirect
 			}
 
+			// if there is a trailing slash recommendation and RedirectTrailingSlash is set,
+			// redirect there
 			if tsr && r.RedirectTrailingSlash {
 				if len(path) > 1 && path[len(path)-1] == '/' {
 					req.URL.Path = path[:len(path)-1]
 				} else {
 					req.URL.Path = path + "/"
 				}
+
+				// redirect to the tsr-fixed URL
 				http.Redirect(w, req, req.URL.String(), code)
+
+				// done serving the request
 				return
 			}
 
-			// Try to fix the request path
+			// if RedirectFixedPath is set, try to fix the and redirect case-errors
 			if r.RedirectFixedPath {
+
+				// do a case insensitive path lookup
 				fixedPath, found := root.findCaseInsensitivePath(
 					CleanPath(path),
 					r.RedirectTrailingSlash,
 				)
+
+				// if a path could be found through case insensitive lookup, redirect to the
+				// correct path
 				if found {
 					req.URL.Path = fixedPath
+
+					// redirect to the case-fixed URL
 					http.Redirect(w, req, req.URL.String(), code)
+
+					// done serving the request
 					return
 				}
 			}
 		}
 	}
 
-	if req.Method == http.MethodOptions && r.Options != nil {
+	// if it is an OPTIONS request (which was not handled above) and HandleOptions is true
+	if req.Method == http.MethodOptions && r.HandleOptions {
+
+		// if there is any method allowed on this path
 		if allow := r.allowed(path, http.MethodOptions); allow != "" {
-			r.Options(w, req, allow)
-			return
-		}
-	} else if r.HandleMethodNotAllowed { // Handle 405
-		if allow := r.allowed(path, req.Method); allow != "" {
-			w.Header().Set("Allow", allow)
-			if r.MethodNotAllowed != nil {
-				r.MethodNotAllowed(w, req)
-			} else {
-				http.Error(w,
-					http.StatusText(http.StatusMethodNotAllowed),
-					http.StatusMethodNotAllowed,
-				)
+
+			// if there is OPTIONS callback function
+			if r.Options != nil {
+
+				// call the function (feeding the list of allowed method)
+				r.Options(w, req, allow)
 			}
+
+			// done serving the request
 			return
 		}
+
+		// if we get here, the OPTIONS request falls through to not found
+
+	} else {
+
+		// if HandleMethodNotAllowed (405) is true
+		if r.HandleMethodNotAllowed {
+
+			// if there methods allowed on the requested path
+			if allow := r.allowed(path, req.Method); allow != "" {
+
+				// if there is Method not allowed callback function
+				if r.MethodNotAllowed != nil {
+
+					// call the function (feeding the list of allowed method)
+					r.MethodNotAllowed(w, req, allow)
+				} else {
+
+					// call the default function (feeding the list of allowed method)
+					defaultMethodNotAllowed(w, req, allow)
+				}
+
+				// done serving the request
+				return
+			}
+		}
+
+		// if we get here, any no OPTIONS request falls through to not found
 	}
 
-	// Handle 404
+	// Not found, respond with a custom callback or the default one.
 	if r.NotFound != nil {
+
+		// call the custom callback
 		r.NotFound(w, req)
 	} else {
+
+		// call the default callback
 		defaultNotFound(w, req)
 	}
 }
@@ -528,7 +611,20 @@ func defaultNotFound(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotFound)
 	bytes, _ := json.Marshal(struct {
 		Error string `json:"error"`
-	}{Error: "not found"})
+	}{Error: http.StatusText(http.StatusNotFound)})
+	w.Write(bytes)
+}
+
+func defaultMethodNotAllowed(w http.ResponseWriter, r *http.Request, allow string) {
+
+	// see: https://tools.ietf.org/html/rfc7231#section-6.5.5
+
+	w.Header().Set("Allow", allow)
+	w.Header().Set(HeaderContentType, MIMEApplicationJSONCharsetUTF8)
+	w.WriteHeader(http.StatusMethodNotAllowed)
+	bytes, _ := json.Marshal(struct {
+		Error string `json:"error"`
+	}{Error: http.StatusText(http.StatusMethodNotAllowed)})
 	w.Write(bytes)
 }
 
