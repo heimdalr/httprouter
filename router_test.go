@@ -207,6 +207,7 @@ func TestRouterOPTIONS(t *testing.T) {
 	handlerFunc := func(_ *Context) {}
 
 	router := New()
+	router.HandleOptions = true
 	router.POST("/path", handlerFunc)
 	router.Options = func(w http.ResponseWriter, req *http.Request, allow string) {
 		w.Header().Set("Allow", allow)
@@ -307,6 +308,7 @@ func TestRouterNotAllowed(t *testing.T) {
 	handlerFunc := func(_ *Context) {}
 
 	router := New()
+	router.HandleMethodNotAllowed = true
 	router.POST("/path", handlerFunc)
 
 	// test not allowed
@@ -336,10 +338,10 @@ func TestRouterNotAllowed(t *testing.T) {
 	// test custom handler
 	w = httptest.NewRecorder()
 	responseText := "custom method"
-	router.MethodNotAllowed = http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+	router.MethodNotAllowed = func(w http.ResponseWriter, req *http.Request, _ string) {
 		w.WriteHeader(http.StatusTeapot)
 		w.Write([]byte(responseText))
-	})
+	}
 	router.ServeHTTP(w, r)
 	if got := w.Body.String(); !(got == responseText) {
 		t.Errorf("unexpected response got %q want %q", got, responseText)
@@ -347,9 +349,7 @@ func TestRouterNotAllowed(t *testing.T) {
 	if w.Code != http.StatusTeapot {
 		t.Errorf("unexpected response code %d want %d", w.Code, http.StatusTeapot)
 	}
-	if allow := w.Header().Get("Allow"); allow != "DELETE, OPTIONS, POST" {
-		t.Error("unexpected Allow header value: " + allow)
-	}
+
 }
 
 func TestRouterNotFound(t *testing.T) {

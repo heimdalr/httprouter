@@ -167,7 +167,12 @@ type Router struct {
 	RedirectFixedPath bool
 
 	// If enabled, the router automatically replies to OPTIONS requests.
-	// Custom OPTIONS handlers take priority over automatic replies.
+	// Path-specific OPTIONS handlers take priority over "automatic" replies.
+	//
+	// Note, if HandleOptions is set to true and Options is not set, the default,
+	// very permissive OPTIONS handler will be used.
+	//
+	// Default: false
 	HandleOptions bool
 
 	// A callback function for handling OPTION requests. The function is only called,
@@ -183,6 +188,7 @@ type Router struct {
 	// and HTTP status code 405.
 	// If no other Method is allowed, the request is delegated to the NotFound
 	// handler.
+	// Default: false
 	HandleMethodNotAllowed bool
 
 	// A callback function for handling non-OPTION requests. The function is only called,
@@ -217,7 +223,8 @@ func New() *Router {
 	return &Router{
 		RedirectTrailingSlash:  true,
 		RedirectFixedPath:      true,
-		HandleMethodNotAllowed: true,
+		HandleOptions: 			false,
+		HandleMethodNotAllowed: false,
 	}
 }
 
@@ -551,19 +558,24 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	// if it is an OPTIONS request (which was not handled above) and HandleOptions is true
 	if req.Method == http.MethodOptions && r.HandleOptions {
 
-		// if there is any method allowed on this path
-		if allow := r.allowed(path, http.MethodOptions); allow != "" {
+			// if there is any method allowed on this path
+			if allow := r.allowed(path, http.MethodOptions); allow != "" {
 
-			// if there is OPTIONS callback function
-			if r.Options != nil {
+				// if there is OPTIONS callback function
+				if r.Options != nil {
 
-				// call the function (feeding the list of allowed method)
-				r.Options(w, req, allow)
+					// call the function (feeding the list of allowed method)
+					r.Options(w, req, allow)
+
+				} else {
+
+					// call the default function (feeding the list of allowed method)
+					defaultOptions(w, req, allow)
+				}
+
+				// done serving the request
+				return
 			}
-
-			// done serving the request
-			return
-		}
 
 		// if we get here, the OPTIONS request falls through to not found
 
@@ -627,6 +639,27 @@ func defaultMethodNotAllowed(w http.ResponseWriter, r *http.Request, allow strin
 	}{Error: http.StatusText(http.StatusMethodNotAllowed)})
 	w.Write(bytes)
 }
+
+func defaultOptions(w http.ResponseWriter, r *http.Request, allow string) {
+
+	// if the Access-Control-Request-Method header is set
+	//
+	// if the Access-Control-Request-Method header is not set, we simply return 204
+	// which will handled by the browser as unsuccessful preflight
+	if r.Header.Get(HeaderAccessControlRequestMethod) != "" {
+
+		// set header indicating all methods for this path
+		w.Header().Set("Access-Control-Allow-Methods", allow)
+
+		// set header indicating ALL(!) origins
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+	}
+
+	// set status code to 204
+	w.WriteHeader(http.StatusNoContent)
+	w.Write(nil)
+}
+
 
 // MIME types
 const (
